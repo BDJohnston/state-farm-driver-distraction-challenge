@@ -373,7 +373,7 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
         
     create_submission(tt[8000:,:], tst[7726:], info_string)
 
-if __name__ == __main__:
+if __name__ == '__main__':
     m_name = '_pytorch_vgg_16_dropout_2x20_8_15_0_15'
 
     # view_train_dataset()
