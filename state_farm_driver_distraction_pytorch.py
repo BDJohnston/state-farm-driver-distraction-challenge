@@ -42,7 +42,7 @@ torch.manual_seed(2019);
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
-root_dir = '/content/gdrive/My Drive/state_farm/'
+root_dir = '/state_farm/'
 
 def merge_several_folds_mean(data, nfolds):
     a = np.array(data[0])
@@ -78,32 +78,23 @@ def get_knn_wa_predictions(test_final_pool_layer_outputs, yfull_test, k=11):
     gpu_index_flat = faiss.index_cpu_to_gpu(res, 1, index_flat)
 
     gpu_index_flat.add(test_final_pool_layer_outputs) # add vectors to the index
-    print(gpu_index_flat.ntotal)
+    # print(gpu_index_flat.ntotal)
 
     k = k # for 10 nearest neighbors, set k = 11
     D, I = gpu_index_flat.search(test_final_pool_layer_outputs, k) # actual search
 
-    print(D[0])
     D = D.transpose()
     D = D + 1e-6
 
-    print(D[0])
     D = 1/D
-    print(D[0])
-    print(I[:5]) # neighbors of the 5 first queries
-    print(I[-5:]) # neighbors of the 5 last queries
-
+    
     yfull_test_knn_wa = np.zeros((yfull_test.shape[0], yfull_test.shape[1])).astype('float32')
     for i in range(I.shape[0]):
         yfull_test_knn_wa[i] = np.matmul(yfull_test[I[i,1:].astype(int)].T, (D[1:,i] - np.amin(D[1:,i]))/np.sum(D[1:,i] - -np.amin(D[1:,i]))).T
-    print(yfull_test)
-    print(yfull_test_knn_wa)
     gpu_index_flat.reset()
     del gpu_index_flat
     del res
     torch.cuda.empty_cache()
-
-    print('CPU and GPU memory ok')
 
     return yfull_test_knn_wa
     
@@ -287,7 +278,6 @@ def train_ensemble(nmodels=10, nb_epoch=10, split=0.1, modelStr=''):
 
         net = build_net(nb_epoch, batch_size, training, img_rows, img_cols, split, root_dir + modelStr + '_model_num_' + str(model_num))
 
-        !nvidia-smi
         net.fit(train_dataset, y=y);
 
         del net
@@ -365,7 +355,6 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
                     else:
                         yfull_test = np.vstack((yfull_test, y_pred))
       
-#         !nvidia-smi
         avgpool_outs = np.concatenate(net.module_.sfs)
         avgpool_outs = avgpool_outs.astype('float32')
         print(avgpool_outs.shape)
@@ -386,10 +375,7 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
     create_submission(tt[8000:,:], tst[7726:], info_string)
 
 if __name__ == __main__:
-    # nfolds, nb_epoch, split
-    # m_name = '_vgg_16_2x20'
-    # m_name = '_new_vgg_16_2x20_2_3_0_15'
-    # m_name = '_new_vgg_16_2x20_8_15_0_15'
+
     m_name = '_pytorch_vgg_16_dropout_2x20_8_15_0_15'
 
     view_train_dataset()
