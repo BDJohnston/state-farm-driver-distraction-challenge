@@ -320,10 +320,10 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
                 ]))
             
             test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
-                   shuffle=False, num_workers=4)
+                   shuffle=False)#, num_workers=4)
             
             # Store test predictions
-            test_prediction = 0
+
             criterion = CategoricalCrossEntropy
             checkpoint = Checkpoint(f_params='best_model.pt', fn_prefix=root_dir + modelStr + '_model_num_' + str(model_num))
             net = NeuralNetClassifier(
