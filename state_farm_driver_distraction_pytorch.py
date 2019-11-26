@@ -22,7 +22,7 @@ import copy
 from torchsummary import summary
 from skorch import NeuralNet, NeuralNetClassifier
 from skorch.helper import predefined_split
-from skorch.callbacks import LRScheduler, Checkpoint, ProgressBar, Freezer
+from skorch.callbacks import LRScheduler, Checkpoint, ProgressBar, Freezer, Callback
 from skorch.dataset import CVSplit
 from sklearn.preprocessing import LabelEncoder, LabelBinarizer
 from sklearn.model_selection import cross_val_predict
@@ -37,7 +37,7 @@ plt.ion()   # interactive mode
 
 torch.manual_seed(2019);
 
-root_dir = '/state_farm/'
+root_dir = ''
 
 def merge_several_folds_mean(data, nfolds):
     a = np.array(data[0])
@@ -194,18 +194,22 @@ class SaveFeatures():
     def remove(self): self.hook.remove()
 
 class PretrainedModel(nn.Module):
-    def __init__(self, training):
+    def __init__(self, training=False):
         super(PretrainedModel, self).__init__()
+        
         self.training = training
+        
         model_ft = models.vgg16(pretrained=True)
-        self.sfs = SaveFeatures(model_ft.avgpool)
-
         model_ft.classifier[6] = nn.Linear(4096, 10)
-        self.softmax = nn.Softmax(dim=1)
-        self.log_softmax = nn.LogSoftmax(dim=1)
+        self.model_ft = model_ft   
+
         # summary(model_ft, (3, 224, 224))
 
-        self.model_ft = model_ft   
+        self.softmax = nn.Softmax(dim=1)
+        self.log_softmax = nn.LogSoftmax(dim=1)
+        
+        if self.training:
+            self.sfs = SaveFeatures(self.model_ft.avgpool)
 
     def forward(self, x):
         x = self.model_ft(x)  
@@ -324,7 +328,6 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
                    shuffle=False, num_workers=4)
             
             # Store test predictions
-            test_prediction = 0
             criterion = CategoricalCrossEntropy
             checkpoint = Checkpoint(f_params='best_model.pt', fn_prefix=root_dir + modelStr + '_model_num_' + str(model_num))
             net = NeuralNetClassifier(
@@ -379,9 +382,6 @@ if __name__ == '__main__':
     # view_train_dataset()
     
     # nfolds, nb_epoch, split, model name
-    train_ensemble(8, 15, 0.15, m_name)
-
-    test_model_KNN_use_batches_and_submit(1, 8, 15, m_name)
     train_ensemble(8, 15, 0.15, m_name)
 
     test_model_KNN_use_batches_and_submit(1, 8, 15, m_name)
