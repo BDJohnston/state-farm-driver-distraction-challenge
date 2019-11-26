@@ -37,11 +37,6 @@ plt.ion()   # interactive mode
 
 torch.manual_seed(2019);
 
-# dtype = torch.FloatTensor
-# dtype = torch.cuda.FloatTensor # Uncomment this to run on GPU
-
-torch.set_default_tensor_type('torch.cuda.FloatTensor')
-
 root_dir = '/state_farm/'
 
 def merge_several_folds_mean(data, nfolds):
@@ -60,14 +55,11 @@ def merge_several_folds_geom(data, nfolds):
 
 def merge_several_folds_max(data, nfolds):
     a = np.array(data[0])
-    #for i in range(1, nfolds):    
     a = np.amax(np.array(data), axis=1)
     return a.tolist()
     
 def get_knn_wa_predictions(test_final_pool_layer_outputs, yfull_test, k=11):        
         
-    # torch.device('cuda:1')
-
     d=test_final_pool_layer_outputs.shape[1]
 
     res = faiss.StandardGpuResources()
@@ -78,7 +70,6 @@ def get_knn_wa_predictions(test_final_pool_layer_outputs, yfull_test, k=11):
     gpu_index_flat = faiss.index_cpu_to_gpu(res, 1, index_flat)
 
     gpu_index_flat.add(test_final_pool_layer_outputs) # add vectors to the index
-    # print(gpu_index_flat.ntotal)
 
     k = k # for 10 nearest neighbors, set k = 11
     D, I = gpu_index_flat.search(test_final_pool_layer_outputs, k) # actual search
@@ -87,7 +78,7 @@ def get_knn_wa_predictions(test_final_pool_layer_outputs, yfull_test, k=11):
     D = D + 1e-6
 
     D = 1/D
-    
+
     yfull_test_knn_wa = np.zeros((yfull_test.shape[0], yfull_test.shape[1])).astype('float32')
     for i in range(I.shape[0]):
         yfull_test_knn_wa[i] = np.matmul(yfull_test[I[i,1:].astype(int)].T, (D[1:,i] - np.amin(D[1:,i]))/np.sum(D[1:,i] - -np.amin(D[1:,i]))).T
@@ -198,7 +189,7 @@ class SaveFeatures():
     features=[]
     def __init__(self, m): 
         self.hook = m.register_forward_hook(self.hook_fn)
-    def hook_fn(self, module, input, output): self.features.append(output)
+    def hook_fn(self, module, input, output): self.features.append(output.detach().cpu().numpy())
     def clear_features(self): self.features.clear()
     def remove(self): self.hook.remove()
 
@@ -212,7 +203,7 @@ class PretrainedModel(nn.Module):
         model_ft.classifier[6] = nn.Linear(4096, 10)
         self.softmax = nn.Softmax(dim=1)
         self.log_softmax = nn.LogSoftmax(dim=1)
-        summary(model_ft, (3, 224, 224))
+        # summary(model_ft, (3, 224, 224))
 
         self.model_ft = model_ft   
 
@@ -223,6 +214,13 @@ class PretrainedModel(nn.Module):
         else:
             x = self.softmax(x)
         return x
+
+class Print_Memory_Allocated(Callback):
+    def __init__(self):
+        super(Print_Memory_Allocated, self).__init__()
+
+    def on_batch_end(self, net, Xi=None, yi=None, training=None, **kwargs):
+        print(' GPU mem aloc: ', torch.cuda.memory_allocated()*1e-9)
 
 def build_net(num_epochs, batch_size, training, img_rows, img_cols, split, modelStr):
 
@@ -237,16 +235,17 @@ def build_net(num_epochs, batch_size, training, img_rows, img_cols, split, model
         optimizer__momentum=0.9,
         optimizer__nesterov=True,
         iterator_train__shuffle=True,
-        # iterator_train__num_workers=4,
+        iterator_train__num_workers=4,
         iterator_valid__shuffle=True,
-        # iterator_valid__num_workers=4,
+        iterator_valid__num_workers=4,
         train_split=CVSplit(cv=split, stratified=True, random_state=0),# None,
         callbacks=[ ('lrscheduler', LRScheduler(policy='StepLR', step_size=10, gamma=0.1)),
                     ('checkpoint', Checkpoint(f_params='best_model.pt', fn_prefix=modelStr, monitor='valid_loss_best')),
                     ('freezer', Freezer(lambda x: not x.startswith('model_ft.classifier'))),
                     ('progressbar', ProgressBar())
+                    # ,('gpu_memory_alloc', Print_Memory_Allocated())
                   ],
-        device='cuda:0' # comment to train on cpu
+        device='cuda' # comment to train on cpu
     )
 
     return net        
@@ -281,6 +280,8 @@ def train_ensemble(nmodels=10, nb_epoch=10, split=0.1, modelStr=''):
         net.fit(train_dataset, y=y);
 
         del net
+    
+    print('training finished')
 
 def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, modelStr=''):
     img_rows, img_cols = 224, 224
@@ -320,10 +321,10 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
                 ]))
             
             test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
-                   shuffle=False)#, num_workers=4)
+                   shuffle=False, num_workers=4)
             
             # Store test predictions
-
+            test_prediction = 0
             criterion = CategoricalCrossEntropy
             checkpoint = Checkpoint(f_params='best_model.pt', fn_prefix=root_dir + modelStr + '_model_num_' + str(model_num))
             net = NeuralNetClassifier(
@@ -333,9 +334,7 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
                 lr=1e-3,
                 batch_size=batch_size,
                 max_epochs=1,
-                # iterator_train__num_workers=4,
-                # iterator_valid__num_workers=4,
-                device='cuda:0' # comment to train on cpu
+                device='cuda' # comment to train on cpu
             )
          
             net.initialize()
@@ -375,11 +374,14 @@ def test_model_KNN_use_batches_and_submit(start=1, nb_models=1, nb_epoch=3, mode
     create_submission(tt[8000:,:], tst[7726:], info_string)
 
 if __name__ == __main__:
-
     m_name = '_pytorch_vgg_16_dropout_2x20_8_15_0_15'
 
-    view_train_dataset()
+    # view_train_dataset()
+    
+    # nfolds, nb_epoch, split, model name
+    train_ensemble(8, 15, 0.15, m_name)
 
+    test_model_KNN_use_batches_and_submit(1, 8, 15, m_name)
     train_ensemble(8, 15, 0.15, m_name)
 
     test_model_KNN_use_batches_and_submit(1, 8, 15, m_name)
